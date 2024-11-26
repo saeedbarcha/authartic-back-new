@@ -37,9 +37,7 @@ export class AdminController {
     @Query('limit') limit?: number,
     @Query('is_verified') is_verified?: boolean,
     @Query('name') name?: string
-
   ): Promise<any> {
-
     return this.userService.findAllVendors(user, {
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 10,

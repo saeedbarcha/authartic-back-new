@@ -99,6 +99,7 @@ export class UserService {
       await queryRunner.release();
     }
   }
+
   async verifyVendor(verifyVendorDto: VerifyVendorDto, user: User): Promise<Omit<User, 'password'>> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -137,45 +138,101 @@ export class UserService {
     }
   }
 
-  async findAllVendors(user: User, { page = 1, limit = 10, is_verified = true, name }: { page?: number; limit?: number; is_verified?: boolean; name?: string }): Promise<any> {
+  // async findAllVendors(user: User, { page = 1, limit = 10, is_verified = true, name }: { page?: number; limit?: number; is_verified?: boolean; name?: string }): Promise<any> {
+  //   checkIsAdmin(user, 'Only an admin can access this data.');
+
+  //   const query = this.userRepository.createQueryBuilder('user')
+  //     .leftJoinAndSelect('user.country', 'country')
+  //     .leftJoinAndSelect('vendorInfo.attachment', 'attachment')
+  //     .leftJoinAndSelect('vendorInfo.validationCode', 'validationCode')
+  //     .where('user.role = :role', { role: UserRoleEnum.VENDOR })
+  //     .andWhere('user.is_deleted = false');
+
+  //   if (is_verified) {
+  //     query.andWhere('vendorInfo.validationCode IS NOT NULL');
+  //   } else {
+  //     query.andWhere('vendorInfo.validationCode IS NULL');
+  //   }
+
+  //   if (name) {
+  //     query.andWhere('LOWER(user.user_name) LIKE LOWER(:name)', { name: `%${name}%` });
+  //   }
+
+  //   const totalCount = await query.getCount();
+
+  //   const unverifiedVendors = await query.skip((page - 1) * limit).take(limit).getMany();
+
+  //   const vendors = await Promise.all(
+  //     unverifiedVendors.map(async (vendor) => {
+  //       const vendorDetails = await this.findUserById(vendor.id);
+  //       return {
+  //         id: vendorDetails?.id,
+  //         vendor_name: vendorDetails?.user_name,
+  //         email: vendorDetails?.email,
+  //         role: vendorDetails?.role,
+  //         country: vendorDetails?.country?.name,
+  //         verification_status: vendorDetails?.validation_code ? 'Verified' : 'Unverified',
+  //         validation_code: vendorDetails?.validation_code?.code || null,
+  //       };
+  //     })
+  //   );
+
+  //   return {
+  //     is_verified: is_verified,
+  //     totalCount,
+  //     totalPages: Math.ceil(totalCount / limit),
+  //     currentPage: page,
+  //     data: vendors,
+  //   };
+  // }
+  async findAllVendors(
+    user: User,
+    { page = 1, limit = 10, is_verified = true, name }: { page?: number; limit?: number; is_verified?: boolean; name?: string }
+  ): Promise<any> {
+    // Ensure the user is an admin
     checkIsAdmin(user, 'Only an admin can access this data.');
 
+    // Create query builder for User and join VendorInfo explicitly
     const query = this.userRepository.createQueryBuilder('user')
-      .leftJoinAndSelect('user.country', 'country')
-      .leftJoinAndSelect('vendorInfo.attachment', 'attachment')
-      .leftJoinAndSelect('vendorInfo.validationCode', 'validationCode')
-      .where('user.role = :role', { role: UserRoleEnum.VENDOR })
-      .andWhere('user.is_deleted = false');
+      .leftJoinAndSelect('user.country', 'country') // Join with Country
+      .leftJoinAndSelect('VendorInfo', 'vendorInfo', 'vendorInfo.user = user.id') // Join VendorInfo where user_id matches
+      .leftJoinAndSelect('vendorInfo.attachment', 'attachment') // Join VendorInfo's attachment
+      .leftJoinAndSelect('vendorInfo.validationCode', 'validationCode') // Join VendorInfo's validationCode
+      .where('user.role = :role', { role: UserRoleEnum.VENDOR }) // Filter by role
+      .andWhere('user.is_deleted = false'); // Exclude deleted users
 
+    // Filter based on verification status
     if (is_verified) {
-      query.andWhere('vendorInfo.validationCode IS NOT NULL');
+      query.andWhere('vendorInfo.validationCode IS NOT NULL'); // Verified vendors
     } else {
-      query.andWhere('vendorInfo.validationCode IS NULL');
+      query.andWhere('vendorInfo.validationCode IS NULL'); // Unverified vendors
     }
 
+    // Filter based on name if provided
     if (name) {
       query.andWhere('LOWER(user.user_name) LIKE LOWER(:name)', { name: `%${name}%` });
     }
 
+    // Get total count of matching vendors
     const totalCount = await query.getCount();
 
+    // Fetch paginated results
     const unverifiedVendors = await query.skip((page - 1) * limit).take(limit).getMany();
 
-    const vendors = await Promise.all(
-      unverifiedVendors.map(async (vendor) => {
-        const vendorDetails = await this.findUserById(vendor.id);
-        return {
-          id: vendorDetails?.id,
-          vendor_name: vendorDetails?.user_name,
-          email: vendorDetails?.email,
-          role: vendorDetails?.role,
-          country: vendorDetails?.country?.name,
-          verification_status: vendorDetails?.validation_code ? 'Verified' : 'Unverified',
-          validation_code: vendorDetails?.validation_code?.code || null,
-        };
-      })
-    );
+    // Transform the data into the desired format
+    const vendors = unverifiedVendors.map((vendor) => {
+      return {
+        id: vendor.id,
+        vendor_name: vendor.user_name,
+        email: vendor.email,
+        role: vendor.role,
+        country: vendor.country?.name || null,
+        verification_status: vendor['vendorInfo']?.validationCode ? 'Verified' : 'Unverified',
+        validation_code: vendor['vendorInfo']?.validationCode?.code || null,
+      };
+    });
 
+    // Return the final paginated response
     return {
       is_verified: is_verified,
       totalCount,
@@ -185,34 +242,81 @@ export class UserService {
     };
   }
 
+
+  // async findAllUsers(
+  //   user: User,
+  //   { page = 1, limit = 10, name }: { page?: number; limit?: number; name?: string }
+  // ): Promise<any> {
+
+  //   checkIsAdmin(user, 'Only an admin can access this data')
+
+  //   const query = this.userRepository.createQueryBuilder('user')
+  //     .leftJoinAndSelect('user.userProfile', 'userProfile')
+  //     .where('user.role = :role', { role: UserRoleEnum.USER })
+  //     .andWhere('user.is_deleted = false');
+
+  //   if (name) {
+  //     query.andWhere('LOWER(user.user_name) LIKE LOWER(:name)', { name: `%${name}%` });
+  //   }
+
+  //   const totalCount = await query.getCount();
+
+  //   const users = await query
+  //     .skip((page - 1) * limit)
+  //     .take(limit)
+  //     .getMany();
+
+
+  //   const userDetails = await Promise.all(
+  //     users?.map(user => this.findUserById(user?.id))
+  //   );
+
+  //   return {
+  //     totalCount,
+  //     totalPages: Math.ceil(totalCount / limit),
+  //     currentPage: page,
+  //     data: userDetails,
+  //   };
+  // }
   async findAllUsers(
     user: User,
     { page = 1, limit = 10, name }: { page?: number; limit?: number; name?: string }
   ): Promise<any> {
+    // Ensure the user is an admin
+    checkIsAdmin(user, 'Only an admin can access this data');
 
-    checkIsAdmin(user, 'Only an admin can access this data')
-
+    // Create query builder for User and join UserProfile explicitly
     const query = this.userRepository.createQueryBuilder('user')
-      .leftJoinAndSelect('user.userProfile', 'userProfile')
-      .where('user.role = :role', { role: UserRoleEnum.USER })
-      .andWhere('user.is_deleted = false');
+      .leftJoinAndSelect('UserProfile', 'userProfile', 'userProfile.user = user.id') // Join UserProfile where user_id matches
+      .where('user.role = :role', { role: UserRoleEnum.USER }) // Filter by user role
+      .andWhere('user.is_deleted = false'); // Exclude deleted users
 
+    // Filter based on name if provided
     if (name) {
       query.andWhere('LOWER(user.user_name) LIKE LOWER(:name)', { name: `%${name}%` });
     }
 
+    // Get total count of matching users
     const totalCount = await query.getCount();
 
-    const users = await query
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getMany();
+    // Fetch paginated results
+    const users = await query.skip((page - 1) * limit).take(limit).getMany();
 
+    // Transform the data into the desired format
+    const userDetails = users.map((user) => {
+      return {
+        id: user.id,
+        user_name: user.user_name,
+        email: user.email,
+        role: user.role,
+        profile: {
+          phone: user['userProfile']?.phone || null,
+          date_of_birth: user['userProfile']?.date_of_birth || null,
+        },
+      };
+    });
 
-    const userDetails = await Promise.all(
-      users?.map(user => this.findUserById(user?.id))
-    );
-
+    // Return the final paginated response
     return {
       totalCount,
       totalPages: Math.ceil(totalCount / limit),
@@ -221,29 +325,29 @@ export class UserService {
     };
   }
 
-async findUserById(id: number): Promise<any> {
-  const user = await this.userRepository.findOne({
+  async findUserById(id: number): Promise<any> {
+    const user = await this.userRepository.findOne({
       where: { id: id, is_deleted: false },
       relations: ['country'],
-  });
-  throwIfError(!user, 'User not found.', NotFoundException);
+    });
+    throwIfError(!user, 'User not found.', NotFoundException);
 
-  // Initialize the data object with basic user fields common to all roles
-  const userData: any = {
+    // Initialize the data object with basic user fields common to all roles
+    const userData: any = {
       id: user.id,
       email: user.email,
       role: user.role,
       country: user.country ? {
-          id: user.country.id,
-          name: user.country.name,
-          code: user.country.code
+        id: user.country.id,
+        name: user.country.name,
+        code: user.country.code
       } : null
-  };
+    };
 
-  if (user.role === UserRoleEnum.USER) {
+    if (user.role === UserRoleEnum.USER) {
       const userProfile = await this.userProfileRepository.findOne({
-          where: { user: { id: user.id } },
-          relations: ['attachment'],
+        where: { user: { id: user.id } },
+        relations: ['attachment'],
       });
 
       userData.user_name = user.user_name;
@@ -251,15 +355,15 @@ async findUserById(id: number): Promise<any> {
       userData.phone = userProfile?.phone || null;
       userData.is_email_verified = userProfile?.is_verified_email || false;
       userData.profile_image = userProfile?.attachment ? {
-          id: userProfile.attachment.id,
-          url: userProfile.attachment.url,
-          type: userProfile.attachment.file_type
+        id: userProfile.attachment.id,
+        url: userProfile.attachment.url,
+        type: userProfile.attachment.file_type
       } : null;
 
-  } else if (user.role === UserRoleEnum.VENDOR) {
+    } else if (user.role === UserRoleEnum.VENDOR) {
       const vendorInfo = await this.vendorInfoRepository.findOne({
-          where: { user: { id: user.id } },
-          relations: ['attachment', 'validationCode'],
+        where: { user: { id: user.id } },
+        relations: ['attachment', 'validationCode'],
       });
 
       userData.vendor_name = user.user_name;
@@ -271,44 +375,44 @@ async findUserById(id: number): Promise<any> {
       userData.other_links = vendorInfo?.other_links || [];
       userData.is_email_verified = vendorInfo?.is_verified_email || false;
       userData.vendor_logo = vendorInfo?.attachment ? {
-          id: vendorInfo.attachment.id,
-          url: vendorInfo.attachment.url,
-          type: vendorInfo.attachment.file_type
+        id: vendorInfo.attachment.id,
+        url: vendorInfo.attachment.url,
+        type: vendorInfo.attachment.file_type
       } : null;
       userData.validation_code = vendorInfo?.validationCode ? {
-          id: vendorInfo.validationCode.id,
-          code: vendorInfo.validationCode.code,
-          is_used: vendorInfo.validationCode.is_used
+        id: vendorInfo.validationCode.id,
+        code: vendorInfo.validationCode.code,
+        is_used: vendorInfo.validationCode.is_used
       } : null;
 
       // If a subscriptionStatus exists, retrieve it here
       const subscriptionStatus = await this.subscriptionStatusService.findByUserId(user.id);
       userData.subscriptionStatus = subscriptionStatus ? {
-          id: subscriptionStatus.id,
-          remaining_certificates: subscriptionStatus.remaining_certificates,
-          total_certificates_issued: subscriptionStatus.total_certificates_issued,
-          is_expired: subscriptionStatus.is_expired,
-          plan_activated_date: subscriptionStatus.plan_activated_date,
-          plan_expiry_date: subscriptionStatus.plan_expiry_date,
-          subscriptionPlan: subscriptionStatus.subscriptionPlan ? {
-              id: subscriptionStatus.subscriptionPlan.id,
-              name: subscriptionStatus.subscriptionPlan.name,
-              price: subscriptionStatus.subscriptionPlan.price,
-              billingCycle: subscriptionStatus.subscriptionPlan.billingCycle,
-              description: subscriptionStatus.subscriptionPlan.description,
-              subscriptionPlanFeatures: subscriptionStatus.subscriptionPlan.subscriptionPlanFeatures.map(feature => ({
-                  id: feature.id,
-                  name: feature.name,
-                  description: feature.description,
-                  value: feature.value,
-                  additional_cost: feature.additional_cost
-              }))
-          } : null
+        id: subscriptionStatus.id,
+        remaining_certificates: subscriptionStatus.remaining_certificates,
+        total_certificates_issued: subscriptionStatus.total_certificates_issued,
+        is_expired: subscriptionStatus.is_expired,
+        plan_activated_date: subscriptionStatus.plan_activated_date,
+        plan_expiry_date: subscriptionStatus.plan_expiry_date,
+        subscriptionPlan: subscriptionStatus.subscriptionPlan ? {
+          id: subscriptionStatus.subscriptionPlan.id,
+          name: subscriptionStatus.subscriptionPlan.name,
+          price: subscriptionStatus.subscriptionPlan.price,
+          billingCycle: subscriptionStatus.subscriptionPlan.billingCycle,
+          description: subscriptionStatus.subscriptionPlan.description,
+          subscriptionPlanFeatures: subscriptionStatus.subscriptionPlan.subscriptionPlanFeatures.map(feature => ({
+            id: feature.id,
+            name: feature.name,
+            description: feature.description,
+            value: feature.value,
+            additional_cost: feature.additional_cost
+          }))
+        } : null
       } : null;
-  }
+    }
 
-  return userData;
-}
+    return userData;
+  }
 
 
 
